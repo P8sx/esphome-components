@@ -37,7 +37,7 @@ void ESP32DAC::write_state(float state) {
   if (this->pin_->is_inverted())
     state = 1.0f - state;
 
-  state = state * 175;
+  state = state * 255;
 
 #ifdef USE_ESP_IDF
   auto channel = pin_->get_pin() == 17 ? DAC_CHANNEL_1 : DAC_CHANNEL_2;
