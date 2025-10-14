@@ -1,0 +1,576 @@
+#####################################################################################################
+##### NSPANEL ESPHOME created by Blackymas - https://github.com/Blackymas/NSPanel_HA_Blueprint  #####
+##### ESPHOME CORE                                                                              #####
+##### PLEASE only make changes if it is necessary and also the required knowledge is available. #####
+##### For normal use with the Blueprint, no changes are necessary.                              #####
+#####################################################################################################
+---
+substitutions:
+  ##############################
+  ## Change only in your      ##
+  ## local yaml substitutions ##
+  ##############################
+  invalid_cooldown: "100ms"
+  GPIO_RELAY_1_PIN: 22
+  GPIO_RELAY_2_PIN: 19
+
+  DELAY_DEFAULT: 25  # delay in msec
+  DELAY_LONG: 125    # delay in msec
+  DELAY_SHORT: 5     # delay in msec
+
+  PAGE_QRCODE_ID: 17
+  PAGE_UTILITIES_ID: 27
+  PAGE_WEATHER01_ID: 2
+  PAGE_WEATHER02_ID: 3
+  PAGE_WEATHER03_ID: 4
+  PAGE_WEATHER04_ID: 5
+  PAGE_WEATHER05_ID: 6
+
+  TAG_CORE: "nspanel.core"
+
+packages:
+  # yamllint disable rule:colons
+  version:           !include nspanel_esphome_version.yaml
+  api:               !include nspanel_esphome_api.yaml
+  base:              !include nspanel_esphome_base.yaml
+  boot:              !include nspanel_esphome_boot.yaml
+  datetime:          !include nspanel_esphome_datetime.yaml
+  hw_buttons:        !include nspanel_esphome_hw_buttons.yaml
+  hw_display:        !include nspanel_esphome_hw_display.yaml
+  hw_memory:         !include nspanel_esphome_hw_memory.yaml
+  hw_wifi:           !include nspanel_esphome_hw_wifi.yaml
+  page_boot:         !include nspanel_esphome_page_boot.yaml
+  page_home:         !include nspanel_esphome_page_home.yaml
+  page_screensaver:  !include nspanel_esphome_page_screensaver.yaml
+  # yamllint enable rule:colons
+
+##### ESPHOME CONFIGURATION #####
+esphome:
+  platformio_options:
+    build_flags:
+      - -D NSPANEL_HA_BLUEPRINT_CORE
+
+##### START - GLOBALS CONFIGURATION #####
+globals:
+  - id: hardware_settings
+    type: nspanel_ha_blueprint::HardwareSettings
+    restore_value: true
+    initial_value: 'nspanel_ha_blueprint::HardwareSettings{}'
+  ##### Relay icons #####
+  - id: home_relay1_icon
+    type: std::string
+    restore_value: true
+    initial_value: ''
+  - id: home_relay1_icon_color
+    type: uint16_t
+    restore_value: true
+    initial_value: '65535'
+  - id: home_relay2_icon
+    type: std::string
+    restore_value: true
+    initial_value: ''
+  - id: home_relay2_icon_color
+    type: uint16_t
+    restore_value: true
+    initial_value: '65535'
+
+  #### Localization (MUI) ####
+  - id: mui_decimal_separator
+    type: std::string
+    restore_value: true
+    initial_value: '"."'
+
+##### START - NUMBER CONFIGURATION #####
+number:
+  ##### Timers settings #####
+  - name: Timeout Page
+    platform: template
+    id: timeout_page
+    entity_category: config
+    min_value: 0
+    max_value: 86400
+    initial_value: 15
+    step: 1
+    restore_value: true
+    optimistic: true
+    icon: mdi:timer
+    unit_of_measurement: "s"
+    update_interval: never
+    on_value:
+      then:
+        - script.execute: timer_page
+  - name: Timeout Dimming
+    platform: template
+    id: timeout_dim
+    entity_category: config
+    min_value: 0
+    max_value: 86400
+    initial_value: 30
+    step: 1
+    restore_value: true
+    optimistic: true
+    icon: mdi:timer
+    unit_of_measurement: "s"
+    update_interval: never
+    on_value:
+      then:
+        - script.execute: timer_dim
+
+##### START - SWITCH CONFIGURATION #####
+switch:
+  ##### PHYSICAL SWITCH 1 #####
+  - name: Relay 1
+    platform: gpio
+    id: relay_1
+    pin: ${GPIO_RELAY_1_PIN}
+    restore_mode: RESTORE_DEFAULT_OFF
+    on_state:
+      then:
+        - lambda: |-
+            if (id(hardware_settings).relay1_local) id(hardware_settings).button_left_state = x;
+            refresh_relays->execute(1);
+            refresh_hardware_buttons_bars->execute(1);
+  ##### PHYSICAL SWITCH 2 ######
+  - name: Relay 2
+    platform: gpio
+    id: relay_2
+    pin: ${GPIO_RELAY_2_PIN}
+    restore_mode: RESTORE_DEFAULT_OFF
+    on_state:
+      then:
+        - lambda: |-
+            if (id(hardware_settings).relay2_local) id(hardware_settings).button_right_state = x;
+            refresh_relays->execute(2);
+            refresh_hardware_buttons_bars->execute(2);
+
+##### START - TEXT SENSOR CONFIGURATION #####
+text_sensor:
+  ##### Versioning #####
+  - id: version_blueprint
+    name: Version Blueprint
+    platform: template
+    entity_category: diagnostic
+    icon: mdi:tag-text-outline
+    internal: false
+    update_interval: never
+    on_value:
+      then:
+        - lambda: |-
+            ESP_LOGD("${TAG_CORE}", "Blueprint version: %s", x.c_str());
+            if (!x.empty()) blueprint_status_flags.version = true;
+            check_versions->execute(x != "${version}");
+
+  - id: version_esphome
+    name: Version ESPHome
+    platform: template
+    entity_category: diagnostic
+    icon: mdi:tag-text-outline
+    internal: false
+    update_interval: never
+
+script:  # Scripts
+  - id: !extend action_component_color
+    then:
+      - lambda: |-
+          if (page == "mem") {
+            if (component == "relay1_icon_color") {
+              id(home_relay1_icon_color) = color;
+              disp1->set_component_font_color("home.chip_relay1", color);
+            } else if (component == "relay2_icon_color") {
+              id(home_relay1_icon_color) = color;
+              disp1->set_component_font_color("home.chip_relay2", color);
+            }
+          }
+
+  - id: !extend action_component_text
+    then:
+      - lambda: |-
+          if (page == "mem") {
+            if (component == "ver_blueprint") {
+              version_blueprint->publish_state(txt.c_str());
+            } else if (component == "decimal_separator") {
+              id(mui_decimal_separator) = txt;
+            } else if (component == "relay1_icon") {
+              id(home_relay1_icon) = txt;
+              disp1->set_component_text("home.chip_relay1", id(home_relay1_icon).c_str());
+            } else if (component == "relay2_icon") {
+              id(home_relay2_icon) = txt;
+              disp1->set_component_text("home.chip_relay2", id(home_relay2_icon).c_str());
+            }
+          }
+
+  - id: !extend action_component_val
+    then:
+      - lambda: |-
+          if (page == "mem") {
+            if (component == "relay_settings") {
+              // Extract individual relay settings from the calculated uint8_t value
+              // Bit layout from YAML calculation: bits 0,1,4,5 used
+              id(hardware_settings).relay1_local = (val >> 0) & 1;
+              id(hardware_settings).relay1_fallback = (val >> 1) & 1;
+              id(hardware_settings).relay2_local = (val >> 4) & 1;
+              id(hardware_settings).relay2_fallback = (val >> 5) & 1;
+
+              // Update blueprint status
+              blueprint_status_flags.relay_settings = true;
+            }
+          }
+
+  - id: !extend boot
+    then:
+      - delay: ${DELAY_DEFAULT}ms
+      - lambda: |-
+          version_esphome->publish_state("${version}");
+
+  - id: change_climate_state
+    mode: restart
+    parameters:
+      embedded: bool
+      key: string
+      value: string
+    then:
+      - lambda: |-
+          if (!embedded and is_device_ready_for_tasks()) {
+            if (key == "temperature" or key == "target_temp_high" or key == "target_temp_low") {
+              esphome::api::CustomAPIDevice ha_event;
+              ha_event.fire_homeassistant_event("${EVENT_NAME}", {
+                {"device_name", device_name->state.c_str()},
+                {"esphome_version", "${version}"},
+                {"type", "action_call"},
+                {"action", "climate.set_temperature"},
+                {"key", key.c_str()},
+                {"value", to_string(stof(value) / 10)},
+                {"entity", detailed_entity->state.c_str()}
+              });
+            } else if (key == "hvac_mode") {
+              esphome::api::CustomAPIDevice ha_event;
+              ha_event.fire_homeassistant_event("${EVENT_NAME}", {
+                {"device_name", device_name->state.c_str()},
+                {"esphome_version", "${version}"},
+                {"type", "action_call"},
+                {"action", "climate.set_hvac_mode"},
+                {"key", "hvac_mode"},
+                {"value", value.c_str()},
+                {"entity", detailed_entity->state.c_str()}
+              });
+            }
+          }
+
+  - id: check_versions
+    mode: restart
+    parameters:
+      reset_flag: bool
+    then:
+      - lambda: |-
+          ESP_LOGV("${TAG_CORE}", "Script: Check version");
+          ESP_LOGV("${TAG_CORE}", "  reset_flag: %s", TRUEFALSE(reset_flag));
+          ESP_LOGV("${TAG_CORE}", "  VERSION_CHECK_OK: %s", (system_flags.version_check_ok) ? "Set" : "NOT set");
+          ESP_LOGV("${TAG_CORE}", "  is_device_ready_for_tasks: %s", YESNO(is_device_ready_for_tasks()));
+          ESP_LOGV("${TAG_CORE}", "  Versions:");
+          ESP_LOGV("${TAG_CORE}", "    Blueprint: %s", version_blueprint->state.c_str());
+          ESP_LOGV("${TAG_CORE}", "    ESPHome: ${version}");
+          ESP_LOGV("${TAG_CORE}", "    TFT: %s", version_tft->state.c_str());
+          if (reset_flag) system_flags.version_check_ok = false;
+          if (system_flags.version_check_ok) {
+            ESP_LOGD("${TAG_CORE}", "VERSION_CHECK_OK is already set");
+            return;
+          }
+          if (!is_device_ready_for_tasks()) {
+            ESP_LOGD("${TAG_CORE}", "Device not ready for tasks - Skip version check");
+            return;
+          }
+      - delay: 5s
+      - script.execute: wait_for_versions
+      - script.wait: wait_for_versions
+      - lambda: |-
+          ESP_LOGD("${TAG_CORE}", "Versions:");
+          ESP_LOGD("${TAG_CORE}", "  Blueprint: %s", version_blueprint->state.c_str());
+          ESP_LOGD("${TAG_CORE}", "  ESPHome:   ${version}");
+          ESP_LOGD("${TAG_CORE}", "  TFT:       %s", version_tft->state.c_str());
+          system_flags.version_check_ok = true;
+          if (version_blueprint->state != "${version}") {
+            ESP_LOGE("${TAG_CORE}", "Blueprint version mismatch!");
+            system_flags.version_check_ok = false;
+          }
+          if (version_tft->state != "${version}") {
+            ESP_LOGE("${TAG_CORE}", "TFT version mismatch!");
+            system_flags.version_check_ok = false;
+          }
+          esphome::api::CustomAPIDevice ha_event;
+          ha_event.fire_homeassistant_event("${EVENT_NAME}", {
+            {"device_name", device_name->state.c_str()},
+            {"esphome_version", "${version}"},
+            {"type", "version"},
+            {"tft", version_tft->state.c_str()},
+            {"esphome", "${version}"},
+            {"blueprint", version_blueprint->state.c_str()}
+          });
+          ESP_LOGD("${TAG_CORE}", "Check version completed");
+
+  - id: !extend dump_config
+    then:
+      # Report API status
+      - lambda: |-
+          // Report blueprint version
+          ESP_LOGCONFIG("${TAG_CORE}", "Blueprint:");
+          if (system_flags.blueprint_ready) {
+            ESP_LOGCONFIG("${TAG_CORE}", "  Version: %s", version_blueprint->state.c_str());
+            ESP_LOGCONFIG("${TAG_CORE}", "  Progress: %0.1f%%", blueprint_status_flags.get_completion_percentage());
+          } else {
+            ESP_LOGW("${TAG_CORE}", "  Progress: %0.1f%%", blueprint_status_flags.get_completion_percentage());
+            ESP_LOGW("${TAG_CORE}", "  State: %s", (system_flags.wifi_ready and system_flags.api_ready)
+                                                    ? "Pending" : "DISCONNECTED");
+          }
+
+          // Report ESPHome
+          ESP_LOGCONFIG("${TAG_CORE}", "ESPHome:");
+          ESP_LOGCONFIG("${TAG_CORE}", "  Version: ${version}");
+          ESP_LOGCONFIG("${TAG_CORE}", "  Compiler: %s", ESPHOME_VERSION);
+
+          // Report framework
+          #ifdef USE_ESP_IDF
+          ESP_LOGCONFIG("${TAG_CORE}", "  Framework: ESP-IDF");
+          #elif defined(USE_ARDUINO)
+          ESP_LOGW("${TAG_CORE}", "  Framework: Arduino");
+          #else
+          ESP_LOGE("${TAG_CORE}", "  Framework: Unknown");
+          #endif
+
+          // Report Packages
+          ESP_LOGCONFIG("${TAG_CORE}", "Packages:");
+          #ifdef NSPANEL_HA_BLUEPRINT_CORE
+          ESP_LOGCONFIG("${TAG_CORE}", "  - Core");
+          #endif
+          #ifdef NSPANEL_HA_BLUEPRINT_ADVANCED
+          ESP_LOGCONFIG("${TAG_CORE}", "  - Advanced");
+          #endif
+          #ifdef NSPANEL_HA_BLUEPRINT_ADDON_BLUETOOTH_PROXY
+          ESP_LOGCONFIG("${TAG_CORE}", "  - Bluetooth Proxy");
+          #endif
+          #ifdef NSPANEL_HA_BLUEPRINT_ADDON_UPLOAD_TFT
+          ESP_LOGCONFIG("${TAG_CORE}", "  - Upload TFT");
+          #endif
+          #ifdef NSPANEL_HA_BLUEPRINT_ADDON_CLIMATE_BASE
+          ESP_LOGCONFIG("${TAG_CORE}", "  - Climate - Base");
+          #endif
+          #ifdef NSPANEL_HA_BLUEPRINT_ADDON_CLIMATE_COOL
+          ESP_LOGCONFIG("${TAG_CORE}", "  - Climate - Cool");
+          #endif
+          #ifdef NSPANEL_HA_BLUEPRINT_ADDON_CLIMATE_DUAL
+          ESP_LOGCONFIG("${TAG_CORE}", "  - Climate - Dual");
+          #endif
+          #ifdef NSPANEL_HA_BLUEPRINT_ADDON_CLIMATE_HEAT
+          ESP_LOGCONFIG("${TAG_CORE}", "  - Climate - Heat");
+          #endif
+          #ifdef NSPANEL_HA_BLUEPRINT_PREBUILT
+          ESP_LOGCONFIG("${TAG_CORE}", "  - Pre-built");
+          #endif
+          #ifdef NSPANEL_HA_BLUEPRINT_PREBUILT_WALL_DISPLAY
+          ESP_LOGCONFIG("${TAG_CORE}", "  - Pre-built (Wall Display)");
+          #endif
+          #if defined(USE_BLUETOOTH_PROXY) || defined(USE_WEBSERVER) || defined(USE_CAPTIVE_PORTAL)
+          ESP_LOGCONFIG("${TAG_CORE}", "Components:");
+          #ifdef USE_ESP32_BLE_SERVER
+          ESP_LOGCONFIG("${TAG_CORE}", "  - BLE server");
+          #endif
+          #ifdef USE_ESP32_BLE_CLIENT
+          ESP_LOGCONFIG("${TAG_CORE}", "  - BLE tracker");
+          #endif
+          #ifdef USE_BLUETOOTH_PROXY
+          ESP_LOGCONFIG("${TAG_CORE}", "  - Bluetooth proxy");
+          #endif
+          #ifdef USE_CAPTIVE_PORTAL
+          ESP_LOGCONFIG("${TAG_CORE}", "  - Captive portal");
+          #endif
+          #ifdef USE_IMPROV
+          ESP_LOGCONFIG("${TAG_CORE}", "  - Improv (BLE)");
+          #endif
+          #ifdef USE_WEBSERVER
+          ESP_LOGCONFIG("${TAG_CORE}", "  - Web server");
+          #endif
+          #endif
+
+  - id: page_blank
+    mode: single
+    then:
+      - lambda: |-
+          ESP_LOGW("${TAG_CORE}", "Construct blank page");
+          disp1->set_component_text("esp_version", "FW: ${version}");  // ESPHome version
+          #ifdef ARDUINO
+          disp1->set_component_text("framework", "Arduino");
+          #elif defined(USE_ESP_IDF)
+          disp1->set_component_text("framework", "ESP-IDF");
+          #endif
+
+  - id: page_qrcode
+    mode: single
+    then:  # There's nothing here so far
+
+  - id: page_utilities
+    mode: single
+    then:
+      - lambda: if (UtilitiesGroups == nullptr) resetUtilitiesGroups();
+
+  - id: page_weather
+    mode: single
+    parameters:
+      page_number: uint
+    then:  # There's nothing here so far
+  - id: page_weather01
+    mode: single
+    then:
+      - script.execute:
+          id: page_weather
+          page_number: 1
+  - id: page_weather02
+    mode: single
+    then:
+      - script.execute:
+          id: page_weather
+          page_number: 2
+  - id: page_weather03
+    mode: single
+    then:
+      - script.execute:
+          id: page_weather
+          page_number: 3
+  - id: page_weather04
+    mode: single
+    then:
+      - script.execute:
+          id: page_weather
+          page_number: 4
+  - id: page_weather05
+    mode: single
+    then:
+      - script.execute:
+          id: page_weather
+          page_number: 5
+
+  - id: refresh_relays
+    mode: single
+    parameters:
+      relay_mask: uint8_t
+    then:
+      - lambda: |-
+          if (relay_mask & 1) {  // Chip - Relay 1
+            disp1->set_component_font_color("home.chip_relay1", relay_1->state ? id(home_relay1_icon_color) : 0);
+          }
+          if (relay_mask & 2) {  // Chip - Relay 2
+            disp1->set_component_font_color("home.chip_relay2", relay_2->state ? id(home_relay2_icon_color) : 0);
+          }
+
+  - id: !extend stop_all
+    mode: single
+    then:
+      - script.stop: check_versions
+      - script.stop: wakeup
+      - script.stop: wait_for_api
+      - script.stop: wait_for_blueprint
+      - script.stop: wait_for_version_blueprint
+      - script.stop: wait_for_versions
+      - lambda: |-
+          change_climate_state->stop();
+          refresh_relays->stop();
+          cleanupUtilitiesGroups();
+
+  - id: wakeup
+    mode: single
+    parameters:
+      reset_timer: bool
+    then:
+      - lambda: |-
+          if (current_page_id == ${PAGE_SCREENSAVER_ID} or current_page_id == ${PAGE_BOOT_ID}) {
+            ESP_LOGD("${TAG_CORE}", "Wake-up on page: %s", wakeup_page_name->state.c_str());
+            if (wakeup_page_id == ${PAGE_CLIMATE_ID}) {
+              detailed_entity->publish_state((id(is_embedded_thermostat)) ? "embedded_climate" : "");
+              disp1->set_component_value("climate.embedded", id(is_embedded_thermostat) ? 1 : 0);
+            }
+            goto_page->execute(wakeup_page_id);
+          }
+          if (reset_timer) {
+            timer_reset_all->execute();
+          } else {
+            timer_sleep->execute();
+            timer_dim->execute();
+          }
+
+  - id: wait_for_api
+    mode: single
+    then:
+      - repeat:
+          count: 60  # seconds
+          then:
+            - if:
+                condition:
+                  - lambda: return system_flags.wifi_ready;
+                then:
+                  - script.stop: wait_for_api
+            - if:
+                condition:
+                  - lambda: return (iteration % 5 == 1);  // Log every 5 seconds (at iterations 1, 6, 11, etc.)
+                then:
+                  - script.execute:
+                      id: boot_log
+                      category: "Boot"
+                      log_message: "Waiting for API..."
+            - delay: 1s
+
+  - id: wait_for_blueprint
+    mode: single
+    then:
+      - script.execute:
+          id: boot_log
+          category: Boot
+          log_message: Waiting for Blueprint
+      - while:
+          condition:
+            - lambda: return not (system_flags.blueprint_ready);
+            - lambda: return not is_blueprint_fully_ready();
+          then:
+            - lambda: |-
+                ESP_LOGD("${TAG_CORE}", "Blueprint progress: %0.1f%%", blueprint_status_flags.get_completion_percentage());
+                ESP_LOGV("${TAG_CORE}", "  Page home: %s", YESNO(blueprint_status_flags.page_home));
+                ESP_LOGV("${TAG_CORE}", "  Page qrcode: %s", YESNO(blueprint_status_flags.qrcode));
+                ESP_LOGV("${TAG_CORE}", "  Relay settings: %s", YESNO(blueprint_status_flags.relay_settings));
+                ESP_LOGV("${TAG_CORE}", "  Version: %s", YESNO(blueprint_status_flags.version));
+                ESP_LOGV("${TAG_CORE}", "  HW Buttons settings: %s", YESNO(blueprint_status_flags.hw_buttons_settings));
+            - delay: 1s
+      - script.execute:
+          id: boot_log
+          category: Boot
+          log_message: Blueprint is ready
+      - script.execute: refresh_wifi_icon
+
+  - id: wait_for_version_blueprint
+    mode: single
+    then:
+      - repeat:
+          count: 60  # seconds
+          then:
+            - if:
+                condition:
+                  - lambda: return not version_blueprint->state.empty();
+                  # - text_sensor.state:  # compare_versions("${version}", version_blueprint->state.c_str());
+                  #     id: version_blueprint
+                  #     state: ${version}
+                then:
+                  - script.stop: wait_for_version_blueprint
+            - if:
+                condition:
+                  - lambda: return (iteration % 5 == 1);  // Log every 5 seconds (at iterations 1, 6, 11, etc.)
+                then:
+                  - script.execute:
+                      id: boot_log
+                      category: "Boot"
+                      log_message: "Waiting for Blueprint version..."
+            - delay: 1s
+
+  - id: wait_for_versions
+    mode: single
+    then:
+      - script.execute: wait_for_version_blueprint
+      - script.execute: wait_for_version_tft
+      - script.wait: wait_for_version_blueprint
+      - script.wait: wait_for_version_tft
+...
