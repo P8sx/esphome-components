@@ -163,10 +163,6 @@ text_sensor:
 
 wifi:
   id: wifi_component
-  networks:
-    - id: wifi_default
-      ssid: ${wifi_ssid}
-      password: ${wifi_password}
   on_connect:
     then:
       - lambda: |-
