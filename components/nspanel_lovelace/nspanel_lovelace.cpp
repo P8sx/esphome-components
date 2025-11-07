@@ -2309,7 +2309,7 @@ void NSPanelLovelace::call_ha_service_(
     resp.data_template.push_back(kv);
   }
 
-  api::global_api_server->send_homeassistant_service_call(resp);
+  api::global_api_server->send_homeassistant_action(resp);
 }
 
 void NSPanelLovelace::on_entity_state_update_(std::string entity_id, std::string state) {
