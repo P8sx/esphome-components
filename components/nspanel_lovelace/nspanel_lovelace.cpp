@@ -1886,6 +1886,7 @@ void NSPanelLovelace::process_button_press_(
         entity_type == entity_type::light ||
         entity_type == entity_type::switch_ ||
         entity_type == entity_type::input_boolean ||
+        entity_type == entity_type::cover ||
         entity_type == entity_type::automation ||
         entity_type == entity_type::fan) {
       this->call_ha_service_(
@@ -2459,7 +2460,7 @@ void NSPanelLovelace::on_weather_forecast_update_(std::string entity_id, std::st
   //       We filter the variables to consume less but it is still a lot,
   //       so we need to allocate an appropriate amount of memory to read it.
 #if ESPHOME_VERSION_CODE >= VERSION_CODE(2025,7,0)
-  static SpiRamAllocator allocator;
+  static 188 allocator;
   JsonDocument doc(&allocator);
 #else
   BasicJsonDocument<SpiRamAllocator> doc(psram_available() ? 7680 : 6144);
