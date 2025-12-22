@@ -1885,7 +1885,6 @@ void NSPanelLovelace::process_button_press_(
     } else if (
         entity_type == entity_type::light ||
         entity_type == entity_type::switch_ ||
-        entity_type == entity_type::cover ||
         entity_type == entity_type::input_boolean ||
         entity_type == entity_type::automation ||
         entity_type == entity_type::fan) {
@@ -2273,7 +2272,11 @@ void NSPanelLovelace::call_ha_service_(
     const std::string &service,
     const std::map<std::string, std::string> &data,
     const std::map<std::string, std::string> &data_template) {
-  api::HomeassistantActionRequest resp;
+  #if ESPHOME_VERSION_CODE >= VERSION_CODE(2025,10,0)
+    api::HomeassistantActionRequest resp;
+  #else
+    api::HomeassistantServiceResponse resp;
+  #endif
   #if ESPHOME_VERSION_CODE >= VERSION_CODE(2025,8,0)
     resp.set_service(esphome::StringRef(service));
   #else
@@ -2287,7 +2290,10 @@ void NSPanelLovelace::call_ha_service_(
     else
       ESP_LOGD(TAG, "Call HA: %s", service.c_str());
   #endif
-
+  
+  #if ESPHOME_VERSION_CODE >= VERSION_CODE(2025,11,0)
+    resp.data.init(data.size());
+  #endif
   for (auto &it : data) {
     api::HomeassistantServiceMap kv;
     #if ESPHOME_VERSION_CODE >= VERSION_CODE(2025,8,0)
@@ -2298,6 +2304,10 @@ void NSPanelLovelace::call_ha_service_(
     kv.value = it.second;
     resp.data.push_back(kv);
   }
+
+  #if ESPHOME_VERSION_CODE >= VERSION_CODE(2025,11,0)
+    resp.data_template.init(data_template.size());
+  #endif
   for (auto &it : data_template) {
     api::HomeassistantServiceMap kv;
     #if ESPHOME_VERSION_CODE >= VERSION_CODE(2025,8,0)
@@ -2309,7 +2319,11 @@ void NSPanelLovelace::call_ha_service_(
     resp.data_template.push_back(kv);
   }
 
-  api::global_api_server->send_homeassistant_action(resp);
+  #if ESPHOME_VERSION_CODE >= VERSION_CODE(2025,10,0)
+    api::global_api_server->send_homeassistant_action(resp);
+  #else
+    api::global_api_server->send_homeassistant_service_call(resp);
+  #endif
 }
 
 void NSPanelLovelace::on_entity_state_update_(std::string entity_id, std::string state) {
