@@ -14,20 +14,19 @@
 #include "esphome/core/automation.h"
 #include "esphome/core/component.h"
 #include "esphome/core/preferences.h"
+#include "esphome/core/string_ref.h"
+#include "esphome/core/version.h"
 #include "esphome/components/uart/uart.h"
 #include "esphome/components/api/custom_api_device.h"
 
-#ifdef USE_ESP_IDF
 #include <driver/gpio.h>
 #include "esphome/components/uart/uart_component_esp_idf.h"
 #ifdef USE_NSPANEL_TFT_UPLOAD
+// #ifndef USE_ARDUINO
 #include <esp_http_client.h>
-#endif
-#else
-#ifdef USE_NSPANEL_TFT_UPLOAD
-#include <HTTPClient.h>
-#endif
-#include "esphome/components/uart/uart_component_esp32_arduino.h"
+// #else
+// #include <HTTPClient.h>
+// #endif
 #endif
 
 #ifdef USE_TIME
@@ -52,7 +51,7 @@ PACK(struct NSPanelRestoreState {
   uint8_t display_inactive_dim_ = 50;
 });
 
-class NSPanelLovelace : public Component, public uart::UARTDevice, protected api::CustomAPIDevice {
+class NSPanelLovelace : public Component, public uart::UARTDevice, public api::CustomAPIDevice {
 public:
   NSPanelLovelace();
   void setup() override;
@@ -122,10 +121,14 @@ public:
   void set_display_inactive_dim(uint8_t inactive);
   // Note: this can be used without parameters to update the display without changing the levels
   void set_display_dim(uint8_t inactive = UINT8_MAX, uint8_t active = UINT8_MAX);
+#ifdef USE_NSPANEL_WEATHER_SERVICE
+  void set_weather_forecast_data(std::string forecast_json);
+#endif
   void set_weather_entity_id(const std::string &weather_entity_id) { this->weather_entity_id_ = weather_entity_id; }
 
   bool get_double_tap_to_unlock() const { return this->double_tap_to_unlock_; }
   void set_double_tap_to_unlock(bool value) { this->double_tap_to_unlock_ = value; }
+  void set_global_vertical_ui(bool val) { this->global_vertical_ui_ = val; }
   
   void render_screensaver_page() { this->render_page_(render_page_option::screensaver_page); }
   void render_next_page() { this->render_page_(render_page_option::next); }
@@ -141,7 +144,7 @@ public:
    */
   void soft_reset_display() {
     // this->send_nextion_command_("rest"); // only for stock FW
-#ifdef USE_ESP_IDF
+#ifndef USE_ARDUINO
     gpio_set_level(GPIO_NUM_4, 1);
     vTaskDelay(pdMS_TO_TICKS(1000));
     gpio_set_level(GPIO_NUM_4, 0);
@@ -179,18 +182,23 @@ protected:
   void init_display_(int baud_rate);
 #ifdef USE_NSPANEL_TFT_UPLOAD
   uint16_t recv_ret_string_(std::string &response, uint32_t timeout, bool recv_flag);
-#ifdef USE_ARDUINO
-  void set_reparse_mode_(bool active);
-#endif
+// #ifdef USE_ARDUINO
+//   void set_reparse_mode_(bool active);
+// #endif
 #endif
   void send_nextion_command_(const std::string &command);
 
   void subscribe_homeassistant_state_attr(
-      void (NSPanelLovelace::*callback)(std::string, std::string, std::string),
-      std::string entity_id, std::string attribute) {
-    auto f = std::bind(callback, this, entity_id, attribute, std::placeholders::_1);
+#if ESPHOME_VERSION_CODE >= VERSION_CODE(2026,1,0)
+    void (NSPanelLovelace::*callback)(const std::string &, const std::string &, esphome::StringRef),
+#else
+    void (NSPanelLovelace::*callback)(std::string, std::string, std::string),
+#endif
+    const std::string &entity_id, const std::string &attr_name
+  ) {
+    auto f = std::bind(callback, this, entity_id, attr_name, std::placeholders::_1);
     api::global_api_server->
-      subscribe_home_assistant_state(entity_id, optional<std::string>(attribute), f);
+      subscribe_home_assistant_state(entity_id, optional<std::string>(attr_name), std::move(f));
   }
 
   bool process_data_();
@@ -251,6 +259,16 @@ protected:
     const std::string& service,
     const std::map<std::string, std::string> &data,
     const std::map<std::string, std::string> &data_template = {});
+#if ESPHOME_VERSION_CODE >= VERSION_CODE(2026,1,0)
+  void on_entity_state_update_(const std::string &entity_id, esphome::StringRef state);
+  void on_entity_attribute_update_(
+    const std::string &entity_id, const std::string &attr_name, esphome::StringRef attr_value);
+
+  void on_weather_state_update_(const std::string &entity_id, esphome::StringRef state);
+  void on_weather_temperature_update_(const std::string &entity_id, esphome::StringRef temperature);
+  void on_weather_temperature_unit_update_(const std::string &entity_id, esphome::StringRef temperature_unit);
+  void on_weather_forecast_update_(const std::string &entity_id, esphome::StringRef forecast_json);
+#else
   void on_entity_state_update_(std::string entity_id, std::string state);
   void on_entity_attribute_update_(
     std::string entity_id, std::string attr_name, std::string attr_value);
@@ -259,6 +277,7 @@ protected:
   void on_weather_temperature_update_(std::string entity_id, std::string temperature);
   void on_weather_temperature_unit_update_(std::string entity_id, std::string temperature_unit);
   void on_weather_forecast_update_(std::string entity_id, std::string forecast_json);
+#endif
   void send_weather_update_command_();
   std::string weather_entity_id_;
   std::string language_;
@@ -274,6 +293,7 @@ protected:
   PageManager page_mgr_;
   std::string popup_page_current_uuid_;
   bool force_current_page_update_ = false;
+  bool global_vertical_ui_{false};
   std::vector<std::shared_ptr<Entity>> entities_;
   std::vector<std::shared_ptr<StatefulPageItem>> stateful_page_items_;
   Screensaver* screensaver_ = nullptr;
@@ -293,13 +313,13 @@ protected:
   uint32_t content_length_ = 0;
   size_t tft_size_ = 0;
   bool upload_first_chunk_sent_ = false;
-#ifdef USE_ESP_IDF
+// #ifndef USE_ARDUINO
   int upload_by_chunks_(esp_http_client_handle_t http_client, uint32_t &range_start);
-#else // USE_ARDUINO
-  uint8_t *transfer_buffer_ = nullptr;
-  size_t transfer_buffer_size_;
-  int upload_by_chunks_(HTTPClient *http, const std::string &url, uint32_t &range_start);
-#endif
+// #else
+//   uint8_t *transfer_buffer_ = nullptr;
+//   size_t transfer_buffer_size_;
+//   int upload_by_chunks_(HTTPClient *http, const std::string &url, uint32_t &range_start);
+// #endif
   bool upload_end_(bool successful);
 #endif // USE_NSPANEL_TFT_UPLOAD
 };

@@ -20,6 +20,7 @@ from esphome.const import (
 
 CODEOWNERS = ["@olicooper"]
 DEPENDENCIES = ["uart", "time", "wifi", "api", "esp32", "json"]
+CONFLICTS_WITH = ["psram"]
 
 def AUTO_LOAD():
     val = ["text_sensor", "json"]
@@ -120,6 +121,7 @@ CONF_ICON_COLOR = "color"
 CONF_ENTITY_ID = "entity_id"
 CONF_SLEEP_TIMEOUT = "sleep_timeout"
 CONF_DEFAULT_CARD = "default_card"
+CONF_EXP_VERT_UI = "experimental_vertical_ui"
 
 CONF_LOCALE = "locale"
 CONF_TEMPERATURE_UNIT = "temperature_unit"
@@ -134,6 +136,7 @@ CONF_SCREENSAVER_STATUS_ICON_LEFT = "status_icon_left"
 CONF_SCREENSAVER_STATUS_ICON_RIGHT = "status_icon_right"
 CONF_SCREENSAVER_STATUS_ICON_ALT_FONT = "alt_font" # todo: to_code
 CONF_SCREENSAVER_DOUBLE_TAP_TO_UNLOCK = "double_tap_to_unlock"
+CONF_SCREENSAVER_FORECAST_METHOD = "forecast_method"
 
 CONF_CARDS = "cards"
 CONF_CARD_TYPE = "type"
@@ -336,7 +339,8 @@ SCHEMA_SCREENSAVER = cv.Schema({
     cv.Optional(CONF_SCREENSAVER_TIME_FORMAT, default="%H:%M"): valid_clock_format('Time format'),
     cv.Optional(CONF_SCREENSAVER_DOUBLE_TAP_TO_UNLOCK, default=False): cv.boolean,
     cv.Optional(CONF_SCREENSAVER_WEATHER): cv.Schema({
-        cv.Required(CONF_ENTITY_ID): valid_entity_id()
+        cv.Required(CONF_ENTITY_ID): valid_entity_id(),
+        cv.Optional(CONF_SCREENSAVER_FORECAST_METHOD, default="template_sensor"): cv.one_of("template_sensor", "service"),
     }),
     cv.Optional(CONF_SCREENSAVER_STATUS_ICON_LEFT): SCHEMA_STATUS_ICON,
     cv.Optional(CONF_SCREENSAVER_STATUS_ICON_RIGHT): SCHEMA_STATUS_ICON,
@@ -446,6 +450,7 @@ CONFIG_SCHEMA = cv.All(
         cv.GenerateID(): cv.declare_id(NSPanelLovelace),
         # Timeout range from 0s to 65s. 0s means disable screensaver.
         cv.Optional(CONF_SLEEP_TIMEOUT, default=10): cv.int_range(0, 65),
+        cv.Optional(CONF_EXP_VERT_UI, default=False): cv.boolean,
         cv.Optional(CONF_MODEL, default='eu'): cv.one_of('eu', 'us-l', 'us-p'),
         cv.Optional(CONF_DEFAULT_CARD): cv.string_strict,
         cv.Optional(CONF_LOCALE, default={}): SCHEMA_LOCALE,
@@ -494,7 +499,7 @@ CONFIG_SCHEMA = cv.All(
     .extend(uart.UART_DEVICE_SCHEMA)
     .extend(cv.COMPONENT_SCHEMA),
     cv.only_on_esp32,
-    cv.require_esphome_version(2025,5,0),
+    cv.require_esphome_version(2026,4,0),
     #cv.only_with_esp_idf,
     validate_config
 )
@@ -616,8 +621,8 @@ async def to_code(config):
                     if string.endswith("TEST_DEVICE_MODE")]
     if is_test_mode:
         _LOGGER.info(f"[nspanel_lovelace] TEST DEVICE MODE ACTIVE, PSRAM DISABLED")
-    # NSPanel has non-standard PSRAM pins which are not modifiable when building for Arduino
-    elif core.CORE.is_esp32:
+    elif not core.CORE.using_arduino or cv.Version.parse(ESPHOME_VERSION) >= cv.Version(2026,6,0):
+        # NSPanel has non-standard PSRAM pins
         cg.add_define("USE_PSRAM")
         esp32.add_idf_sdkconfig_option(
             f"CONFIG_{esp32.get_esp32_variant().upper()}_SPIRAM_SUPPORT", True
@@ -629,7 +634,7 @@ async def to_code(config):
         esp32.add_idf_sdkconfig_option("CONFIG_D0WD_PSRAM_CLK_IO", 5)
         esp32.add_idf_sdkconfig_option("CONFIG_D0WD_PSRAM_CS_IO", 18)
         # Also increase flash & CPU speed as NSPanel hardware supports it
-        esp32.add_idf_sdkconfig_option("CONFIG_ESP32_DEFAULT_CPU_FREQ_240", True)
+        esp32.add_idf_sdkconfig_option("CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240", True)
         esp32.add_idf_sdkconfig_option("CONFIG_SPIRAM_SPEED_80M", True)
         esp32.add_idf_sdkconfig_option("CONFIG_SPIRAM_MODE_QUAD", True)
         esp32.add_idf_sdkconfig_option("CONFIG_ESPTOOLPY_FLASHMODE_QIO", True)
@@ -667,17 +672,26 @@ async def to_code(config):
         # cg.add_define("USE_NSPANEL_TFT_UPLOAD")
         # core.CORE.add_define("USE_NSPANEL_TFT_UPLOAD")
         cg.add_build_flag("-DUSE_NSPANEL_TFT_UPLOAD")
-        if core.CORE.using_arduino:
-            cg.add_library("WiFiClientSecure", None)
-            cg.add_library("HTTPClient", None)
-        elif core.CORE.is_esp32:
-            esp32.add_idf_sdkconfig_option("CONFIG_ESP_TLS_INSECURE", True)
-            esp32.add_idf_sdkconfig_option(
-                "CONFIG_ESP_TLS_SKIP_SERVER_CERT_VERIFY", True
-            )
+
+        ## FIXME: HTTPClient missing when building for Arduino so compilation fails. Using IDF version instead for now
+        # if core.CORE.using_arduino:
+        #     # cg.add_library("WiFiClientSecure", None)
+        #     cg.add_library("NetworkClientSecure", None)
+        #     cg.add_library("HTTPClient", None)
+        # else:
+        ## todo: Remove this condition by esphome version 2026.6.x
+        if hasattr(esp32, "include_builtin_idf_component"):
+            esp32.include_builtin_idf_component("esp_http_client")
+        esp32.add_idf_sdkconfig_option("CONFIG_ESP_TLS_INSECURE", True)
+        esp32.add_idf_sdkconfig_option(
+            "CONFIG_ESP_TLS_SKIP_SERVER_CERT_VERIFY", True
+        )
 
     if CONF_SCREENSAVER in config:
         cg.add(nspanel.set_display_timeout(config[CONF_SLEEP_TIMEOUT]))
+
+    if CONF_EXP_VERT_UI in config:
+        cg.add(nspanel.set_global_vertical_ui(config[CONF_EXP_VERT_UI]))
 
     locale_config = config[CONF_LOCALE]
     global translationJson
@@ -767,8 +781,18 @@ async def to_code(config):
             cg.add(screensaver_class.set_icon_right(iconright_variable_class))
 
         if CONF_SCREENSAVER_WEATHER in screensaver_config:
-            entity_id = screensaver_config[CONF_SCREENSAVER_WEATHER][CONF_ENTITY_ID]
-            cg.add(nspanel.set_weather_entity_id(entity_id))
+            weather_config = screensaver_config[CONF_SCREENSAVER_WEATHER]
+            if CONF_ENTITY_ID in weather_config:
+                cg.add(nspanel.set_weather_entity_id(weather_config[CONF_ENTITY_ID]))
+            if CONF_SCREENSAVER_FORECAST_METHOD in weather_config:
+                if weather_config[CONF_SCREENSAVER_FORECAST_METHOD] == "service":
+                    cg.add_define("USE_API_CUSTOM_SERVICES")
+                    cg.add_define("USE_NSPANEL_WEATHER_SERVICE")
+                else:
+                    _LOGGER.warning(
+                        "forecast_method 'template_sensor' is deprecated and will be removed in esphome 2026.6. "
+                        "Please use forecast_method 'service' instead (see the README for the required HA automation template)."
+                    )
             screensaver_items = []
             # 1 main weather item + 4 forecast items
             for i in range(0,5):
