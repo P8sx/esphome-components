@@ -44,7 +44,7 @@ namespace
         addStringField(
             "status",
             "Meter status.",
-            PrintProperty::INCLUDE_TPL_STATUS | PrintProperty::STATUS);
+            PrintProperty::INCLUDE_TPL_STATUS | PrintProperty::STATUS_WM);
 
         addStringField(
             "mfct_status",

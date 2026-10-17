@@ -2313,8 +2313,8 @@ const char *toString(PrintProperty p) {
     return "REQUIRED";
   case PrintProperty::DEPRECATED:
     return "DEPRECATED";
-  case PrintProperty::STATUS:
-    return "STATUS";
+  case PrintProperty::STATUS_WM:
+    return "STATUS_WM";
   case PrintProperty::INCLUDE_TPL_STATUS:
     return "INCLUDE_TPL_STATUS";
   case PrintProperty::INJECT_INTO_STATUS:
@@ -2333,8 +2333,8 @@ PrintProperty toPrintProperty(const char *s) {
     return PrintProperty::REQUIRED;
   if (!strcmp(s, "DEPRECATED"))
     return PrintProperty::DEPRECATED;
-  if (!strcmp(s, "STATUS"))
-    return PrintProperty::STATUS;
+  if (!strcmp(s, "STATUS_WM"))
+    return PrintProperty::STATUS_WM;
   if (!strcmp(s, "INCLUDE_TPL_STATUS"))
     return PrintProperty::INCLUDE_TPL_STATUS;
   if (!strcmp(s, "INJECT_INTO_STATUS"))
