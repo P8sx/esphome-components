@@ -54,7 +54,7 @@ void CC1101::setup() {
   // Packet control 1: No address check, no append status, no CRC autoflush
   this->write_register(CC1101_PKTCTRL1, 0x00);
   // Packet control 0: Variable packet length, no whitening, no CRC
-  this->write_register(CC1101_PKTCTRL0, 0x00);
+  this->write_register(CC1101_PKTCTRL0, 0x02);
 
   // No device address filtering
   this->write_register(CC1101_ADDR, 0x00);
@@ -67,10 +67,8 @@ void CC1101::setup() {
   this->write_register(CC1101_FSCTRL0, 0x00);
 
   ESP_LOGVV(TAG, "setting radio frequency");
-  // Frequency: 868.95 MHz
-  // FREQ = (f_carrier * 2^16) / f_xtal = (868950000 * 65536) / 26000000 = 0x216BD0
-  const uint32_t frequency = 868950000;
-  uint32_t freq_reg = ((uint64_t)frequency << 16) / F_XTAL;
+  // FREQ = (f_carrier * 2^16) / f_xtal
+  uint32_t freq_reg = ((uint64_t)this->frequency_hz_ << 16) / F_XTAL;
   this->write_register(CC1101_FREQ2, BYTE(freq_reg, 2));
   this->write_register(CC1101_FREQ1, BYTE(freq_reg, 1));
   this->write_register(CC1101_FREQ0, BYTE(freq_reg, 0));
@@ -254,15 +252,15 @@ void CC1101::restart_rx() {
 }
 
 int8_t CC1101::get_rssi() {
-  // Convert RSSI_dec to dBm
-  // RSSI_dBm = (RSSI_dec / 2) - RSSI_offset
-  // RSSI_offset is typically 74 for 868 MHz
-  int8_t rssi_dec = this->last_rssi_;
+  // Convert RSSI_dec to dBm: RSSI_dBm = (RSSI_dec / 2) - RSSI_offset
+  // RSSI offset per TI DN505: 74 dBm for 868 MHz, 76 dBm for 433 MHz
+  int8_t rssi_offset = (this->frequency_hz_ < 600000000u) ? 76 : 74;
+  uint8_t rssi_dec = this->last_rssi_;
   int16_t rssi_dbm;
   if (rssi_dec >= 128) {
-    rssi_dbm = ((int16_t)(rssi_dec - 256) / 2) - 74;
+    rssi_dbm = ((int16_t)(rssi_dec - 256) / 2) - rssi_offset;
   } else {
-    rssi_dbm = (rssi_dec / 2) - 74;
+    rssi_dbm = (rssi_dec / 2) - rssi_offset;
   }
   return (int8_t)rssi_dbm;
 }
@@ -317,7 +315,7 @@ bool CC1101::read_in_task(uint8_t *buffer, size_t length, uint32_t offset) {
 
     // Timeout: 500ms without progress
     if (millis() - last_progress > 500) {
-      ESP_LOGW(TAG, "RX timeout after %zu bytes (need %zu)", total + offset, length + offset);
+      ESP_LOGW(TAG, "RX timeout after %lu bytes (need %lu)", (unsigned long)(total + offset), (unsigned long)(length + offset));
       return false;
     }
 

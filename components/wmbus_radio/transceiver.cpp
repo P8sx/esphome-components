@@ -34,6 +34,10 @@ void RadioTransceiver::set_busy_pin(GPIOPin *busy_pin) {
   this->busy_pin_ = busy_pin;
 }
 
+void RadioTransceiver::set_frequency_hz(uint32_t hz) {
+  this->frequency_hz_ = hz;
+}
+
 void RadioTransceiver::set_rx_gain_mode(const std::string &mode) {
   if (mode == "RX_GAIN_BOOSTED") {
     this->rx_gain_mode_ = RX_GAIN_BOOSTED;
@@ -66,7 +70,7 @@ bool RadioTransceiver::wait_busy(uint32_t timeout_ms) {
   uint32_t start = millis();
   while (this->busy_pin_->digital_read()) {
     if (millis() - start > timeout_ms) {
-      ESP_LOGE(TAG, "BUSY pin timeout after %u ms", timeout_ms);
+      ESP_LOGE(TAG, "BUSY pin timeout after %lu ms", timeout_ms);
       this->mark_failed();
       return false;
     }
@@ -156,6 +160,7 @@ void RadioTransceiver::dump_config() {
   if (this->busy_pin_ != nullptr) {
     LOG_PIN("  BUSY Pin: ", this->busy_pin_);
   }
+  ESP_LOGCONFIG(TAG, "  Frequency: %.3f MHz", this->frequency_hz_ / 1e6f);
   ESP_LOGCONFIG(TAG, "  RX Gain: %s",
                 this->rx_gain_mode_ == RX_GAIN_BOOSTED ? "Boosted" : "Power Saving");
   if (this->rf_switch_) {
